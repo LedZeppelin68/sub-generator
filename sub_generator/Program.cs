@@ -18,108 +18,158 @@ namespace sub_generator
 
         static void Main(string[] args)
         {
-            byte[] sub_chain_1 = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-
-            string file = @"tr\Tomb Raider (USA) (v1.0).cue";
-            string dir = Path.GetDirectoryName(file);
-
-            string[] cue_sheet = File.ReadAllLines(file);
-
-            List<range> ranges = new List<range>();
-
-            List<List<string>> tracks = new List<List<string>>();
-
-            List<string> track = new List<string>();
-
-            //cue parse
-            foreach (string s in cue_sheet)
+            foreach (string arg in args)
             {
-                if (s.StartsWith("FILE")) track.Add(s);
-                if (s.Contains("TRACK")) track.Add(s);
-                if (s.Contains("INDEX 01"))
+                byte[] sub_chain_1 = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+                string file = arg;
+                string dir = Path.GetDirectoryName(file);
+
+                string[] cue_sheet = File.ReadAllLines(file);
+
+                List<range> ranges = new List<range>();
+
+                List<List<string>> tracks = new List<List<string>>();
+
+                List<string> track = new List<string>();
+
+                //cue parse
+                foreach (string s in cue_sheet)
                 {
-                    track.Add(s);
-                    tracks.Add(track);
-                    track = new List<string>();
+                    if (s.StartsWith("FILE")) track.Add(s);
+                    if (s.Contains("TRACK")) track.Add(s);
+                    if (s.Contains("INDEX 01"))
+                    {
+                        track.Add(s);
+                        tracks.Add(track);
+                        track = new List<string>();
+                    }
                 }
+
+                foreach (List<string> s in tracks)
+                {
+                    range r = new range();
+
+                    string file_name = Regex.Match(s[0], "(?<=FILE \").*?(?=\" BINARY)").Value;
+                    long file_size = new FileInfo(Path.Combine(dir, file_name)).Length / 2352;
+
+                    string type = (s[1].Contains("AUDIO")) ? "audio" : "data";
+
+                    bool gap = (s[2].Contains("INDEX 01 00:02:00")) ? true : false;
+
+                    if (gap)
+                    {
+                        ranges.Add(new range() { length = 150, type = "gap" });
+                        file_size -= 150;
+                    }
+
+                    r.length = file_size;
+                    r.type = type;
+
+                    ranges.Add(r);
+                }
+
+                MemoryStream complete_sub_channel = new MemoryStream();
+
+                BinaryWriter bw = new BinaryWriter(complete_sub_channel);
+
+                int absolute_sector_counter = 0;
+                int relative_sector_counter = 0;
+
+                int track_n = 1;
+
+                byte postgap = 0;
+
+                foreach (range r in ranges)
+                {
+                    if (r.type == "audio")
+                    {
+                        relative_sector_counter = 0;
+                    }
+
+                    switch (r.type)
+                    {
+                        case "data":
+                            postgap = 0x41;
+                            break;
+                        case "audio":
+                            postgap = 0x01;
+                            break;
+                    }
+
+                    for (int i = 0; i < r.length; i++)
+                    {
+                        byte[] sub_channel = new byte[96];
+
+                        if (i == 0 && r.type != "gap") sub_chain_1.CopyTo(sub_channel, 0);
+
+                        sub_channel[12] = postgap;
+                        sub_channel[13] = msf_table[track_n];
+                        sub_channel[14] = 0x1;
+
+                        CalculateMSF(relative_sector_counter++).CopyTo(sub_channel, 15);
+                        CalculateMSF(i + absolute_sector_counter + 150).CopyTo(sub_channel, 19);
+                        byte[] crc = BitConverter.GetBytes(CalculateCRC16(sub_channel, 12, 10));
+                        sub_channel[22] = crc[1];
+                        sub_channel[23] = crc[0];
+
+                        bw.Write(sub_channel);
+                    }
+                    if (r.type == "gap") track_n++;
+                    absolute_sector_counter += (int)r.length;
+                }
+
+
+                string lsd_file = Directory.GetFiles(dir, "*.lsd")[0];
+                byte[] lsd = File.ReadAllBytes(lsd_file);
+                BinaryReader br = new BinaryReader(new MemoryStream(lsd));
+
+                while (br.BaseStream.Position != br.BaseStream.Length)
+                {
+                    byte[] target_msf = br.ReadBytes(3);
+
+                    byte[] chain = br.ReadBytes(12);
+
+                    int offset = msf_table.IndexOf(target_msf[0]) * 60 * 75;
+                    offset += msf_table.IndexOf(target_msf[1]) * 75;
+                    offset += msf_table.IndexOf(target_msf[2]) - 150;
+                
+                    bw.BaseStream.Seek(offset * 96 + 12, SeekOrigin.Begin);
+                    bw.Write(chain);
+                }
+
+                //string sbi_file = Directory.GetFiles(dir, "*.sbi")[0];
+                //byte[] sbi = File.ReadAllBytes(sbi_file);
+                //BinaryReader br = new BinaryReader(new MemoryStream(sbi));
+                //
+                //string sbi_magic_word = Encoding.ASCII.GetString(br.ReadBytes(3));
+                //
+                //if (sbi_magic_word == "SBI")
+                //{
+                //    br.BaseStream.Seek(1, SeekOrigin.Current);
+                //    while (br.BaseStream.Position != br.BaseStream.Length)
+                //    {
+                //        byte[] target_msf = br.ReadBytes(3);
+                //        br.BaseStream.Seek(1, SeekOrigin.Current);
+                //        byte[] chain = new byte[12];
+                //        br.ReadBytes(10).CopyTo(chain, 0);
+                //        byte[] crc = BitConverter.GetBytes(CalculateCRC16(chain, 0, 10));
+                //        chain[10] = crc[1];
+                //        chain[11] = crc[0];
+                //
+                //        int offset = msf_table.IndexOf(target_msf[0]) * 60 * 75;
+                //        offset += msf_table.IndexOf(target_msf[1]) * 75;
+                //        offset += msf_table.IndexOf(target_msf[2]) - 150;
+                //
+                //        bw.BaseStream.Seek(offset * 96 + 12, SeekOrigin.Begin);
+                //        bw.Write(chain);
+                //    }
+                //}
+
+
+                bw.Close();
+                File.WriteAllBytes("sub.sub", complete_sub_channel.ToArray());
             }
-
-            foreach(List<string> s in tracks)
-            {
-                range r = new range();
-
-                string file_name = Regex.Match(s[0], "(?<=FILE \").*?(?=\" BINARY)").Value;
-                long file_size = new FileInfo(Path.Combine(dir, file_name)).Length / 2352;
-
-                string type = (s[1].Contains("AUDIO")) ? "audio" : "data";
-
-                bool gap = (s[2].Contains("INDEX 01 00:02:00")) ? true : false;
-
-                if (gap)
-                {
-                    ranges.Add(new range() { length = 150, type = "gap" });
-                    file_size -= 150;
-                }
-
-                r.length = file_size;
-                r.type = type;
-
-                ranges.Add(r);
-            }
-
-            MemoryStream complete_sub_channel = new MemoryStream();
-
-            BinaryWriter bw = new BinaryWriter(complete_sub_channel);
-
-            int absolute_sector_counter = 0;
-            int relative_sector_counter = 0;
-
-            int track_n = 1;
-
-            byte postgap = 0;
-
-            foreach (range r in ranges)
-            {
-                if (r.type == "audio")
-                {
-                    relative_sector_counter = 0;
-                }
-
-                switch (r.type)
-                {
-                    case "data":
-                        postgap = 0x41;
-                        break;
-                    case "audio":
-                        postgap = 0x01;
-                        break;
-                }
-
-                for (int i = 0; i < r.length; i++)
-                {
-                    byte[] sub_channel = new byte[96];
-
-                    if (i == 0 && r.type != "gap") sub_chain_1.CopyTo(sub_channel, 0);
-
-                    sub_channel[12] = postgap;
-                    sub_channel[13] = msf_table[track_n];
-                    sub_channel[14] = 0x1;
-
-                    CalculateMSF(relative_sector_counter++).CopyTo(sub_channel, 15);
-                    CalculateMSF(i + absolute_sector_counter + 150).CopyTo(sub_channel, 19);
-                    byte[] crc = BitConverter.GetBytes(CalculateCRC16(sub_channel, 12, 10));
-                    sub_channel[22] = crc[1];
-                    sub_channel[23] = crc[0];
-
-                    bw.Write(sub_channel);
-                }
-                if (r.type == "gap") track_n++;
-                absolute_sector_counter += (int)r.length;
-            }
-
-            bw.Close();
-
-            File.WriteAllBytes("sub.sub", complete_sub_channel.ToArray());
         }
 
         private static ushort CalculateCRC16(byte[] input, int offset, int length)
@@ -134,7 +184,7 @@ namespace sub_generator
             return (UInt16)~crc;
         }
 
-        static byte[] msf_table = {
+        static List<byte> msf_table = new List<byte> {
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
             0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29,
@@ -160,9 +210,9 @@ namespace sub_generator
             long seconds = sector_n % 4500 / 75;
             long frames = sector_n % 75;
 
-            msf[0] = msf_table[minutes];
-            msf[1] = msf_table[seconds];
-            msf[2] = msf_table[frames];
+            msf[0] = msf_table[(int)minutes];
+            msf[1] = msf_table[(int)seconds];
+            msf[2] = msf_table[(int)frames];
 
             return msf;
         }
