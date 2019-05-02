@@ -120,24 +120,26 @@ namespace sub_generator
                 }
 
 
-                string lsd_file = Directory.GetFiles(dir, "*.lsd")[0];
-                byte[] lsd = File.ReadAllBytes(lsd_file);
-                BinaryReader br = new BinaryReader(new MemoryStream(lsd));
-
-                while (br.BaseStream.Position != br.BaseStream.Length)
+                string lsd_file = (Directory.GetFiles(dir, "*.lsd").Length == 1) ? Directory.GetFiles(dir, "*.lsd")[0] : string.Empty;
+                if (lsd_file != string.Empty)
                 {
-                    byte[] target_msf = br.ReadBytes(3);
+                    byte[] lsd = File.ReadAllBytes(lsd_file);
+                    BinaryReader br = new BinaryReader(new MemoryStream(lsd));
 
-                    byte[] chain = br.ReadBytes(12);
+                    while (br.BaseStream.Position != br.BaseStream.Length)
+                    {
+                        byte[] target_msf = br.ReadBytes(3);
 
-                    int offset = msf_table.IndexOf(target_msf[0]) * 60 * 75;
-                    offset += msf_table.IndexOf(target_msf[1]) * 75;
-                    offset += msf_table.IndexOf(target_msf[2]) - 150;
-                
-                    bw.BaseStream.Seek(offset * 96 + 12, SeekOrigin.Begin);
-                    bw.Write(chain);
+                        byte[] chain = br.ReadBytes(12);
+
+                        int offset = msf_table.IndexOf(target_msf[0]) * 60 * 75;
+                        offset += msf_table.IndexOf(target_msf[1]) * 75;
+                        offset += msf_table.IndexOf(target_msf[2]) - 150;
+
+                        bw.BaseStream.Seek(offset * 96 + 12, SeekOrigin.Begin);
+                        bw.Write(chain);
+                    }
                 }
-
                 //string sbi_file = Directory.GetFiles(dir, "*.sbi")[0];
                 //byte[] sbi = File.ReadAllBytes(sbi_file);
                 //BinaryReader br = new BinaryReader(new MemoryStream(sbi));
