@@ -46,12 +46,15 @@ namespace sub_generator
                     }
                 }
 
+                int lead_out = 0;
+
                 foreach (List<string> s in tracks)
                 {
                     range r = new range();
 
                     string file_name = Regex.Match(s[0], "(?<=FILE \").*?(?=\" BINARY)").Value;
                     long file_size = new FileInfo(Path.Combine(dir, file_name)).Length / 2352;
+                    lead_out += (int)file_size;
 
                     string type = (s[1].Contains("AUDIO")) ? "audio" : s[1].Contains("MODE1") ? "mode1" : "mode2";
 
@@ -135,7 +138,7 @@ namespace sub_generator
                     absolute_sector_counter += (int)r.length;
                 }
 
-                List<string> CCD = CreateCCD(control_ccd);
+                List<string> CCD = CreateCCD(control_ccd, lead_out);
 
                 File.WriteAllLines("ccd.ccd", CCD);
 
@@ -193,7 +196,7 @@ namespace sub_generator
             }
         }
 
-        private static List<string> CreateCCD(List<clone_cd> control_ccd)
+        private static List<string> CreateCCD(List<clone_cd> control_ccd, int lead_out)
         {
             List<string> CCD = new List<string>();
             CCD.Add("[CloneCD]");
@@ -208,45 +211,67 @@ namespace sub_generator
             CCD.Add("PreGapMode=2");
             CCD.Add("PreGapSubC=0");
 
-            int entry = 0;
+            byte[] msf = new byte[3];
 
-            int lead_out = 0;
-            foreach(clone_cd v in control_ccd)
-            {
-                lead_out += v.offset;
-            }
+            msf = CalculateMSF(6750 + 150);
 
-            for (int i = 0; i < 3; i++)
-            {
-                byte[] msf = new byte[3];
-                int offset = 0;
+            CCD.Add(string.Format("[Entry {0}]", 0));
+            CCD.Add(string.Format("Session={0}", 1));
+            CCD.Add(string.Format("Point=0x{0:x2}", 0xa0));
+            CCD.Add(string.Format("ADR=0x{0:x2}", 1));
+            CCD.Add(string.Format("Control=0x{0:x2}", 4));
+            CCD.Add(string.Format("TrackNo=0"));
+            CCD.Add(string.Format("AMin=0"));
+            CCD.Add(string.Format("ASec=0"));
+            CCD.Add(string.Format("AFrame=0"));
+            CCD.Add(string.Format("ALBA=-150"));
+            CCD.Add(string.Format("Zero=0"));
+            CCD.Add(string.Format("PMin={0}", msf_table.IndexOf(msf[0])));
+            CCD.Add(string.Format("PSec={0}", msf_table.IndexOf(msf[1])));
+            CCD.Add(string.Format("PFrame={0}", msf_table.IndexOf(msf[2])));
+            CCD.Add(string.Format("PLBA={0}", 6750));
+            //}
 
-                if (i == 0)
-                {
-                    msf = CalculateMSF(6750 + 150);
-                    offset = 6750;
-                }
+            //entry 1
+            CCD.Add(string.Format("[Entry {0}]", 1));
+            CCD.Add(string.Format("Session={0}", 1));
+            CCD.Add(string.Format("Point=0x{0:x2}", 0xa1));
+            CCD.Add(string.Format("ADR=0x{0:x2}", 1));
+            CCD.Add(string.Format("Control=0x{0:x2}", (control_ccd.Count > 1) ? 0 : 4));
+            CCD.Add(string.Format("TrackNo=0"));
+            CCD.Add(string.Format("AMin=0"));
+            CCD.Add(string.Format("ASec=0"));
+            CCD.Add(string.Format("AFrame=0"));
+            CCD.Add(string.Format("ALBA=-150"));
+            CCD.Add(string.Format("Zero=0"));
+            CCD.Add(string.Format("PMin={0}", control_ccd.Count));
+            CCD.Add(string.Format("PSec={0}", 0));
+            CCD.Add(string.Format("PFrame={0}", 0));
+            CCD.Add(string.Format("PLBA={0}", control_ccd.Count * 4500 - 150));
 
-                CCD.Add(string.Format("[Entry {0}]", entry++));
-                CCD.Add(string.Format("Session={0}", 1));
-                CCD.Add(string.Format("Point=0x{0:x2}", 0xa0 + i));
-                CCD.Add(string.Format("ADR=0x{0:x2}", 0));
-                CCD.Add(string.Format("Control=0x{0:x2}", 0));
-                CCD.Add(string.Format("TrackNo=0"));
-                CCD.Add(string.Format("AMin=0"));
-                CCD.Add(string.Format("ASec=0"));
-                CCD.Add(string.Format("AFrame=0"));
-                CCD.Add(string.Format("ALBA=-150"));
-                CCD.Add(string.Format("Zero=0"));
-                CCD.Add(string.Format("PMin={0}", msf[0]));
-                CCD.Add(string.Format("PSec={0}", msf[1]));
-                CCD.Add(string.Format("PFrame={0}", msf[2]));
-                CCD.Add(string.Format("PLBA={0}", offset));
-            }
+            msf = CalculateMSF(lead_out + 150);
+            //entry 2
+            CCD.Add(string.Format("[Entry {0}]", 2));
+            CCD.Add(string.Format("Session={0}", 1));
+            CCD.Add(string.Format("Point=0x{0:x2}", 0xa2));
+            CCD.Add(string.Format("ADR=0x{0:x2}", 1));
+            CCD.Add(string.Format("Control=0x{0:x2}", (control_ccd.Count > 1) ? 0 : 4));
+            CCD.Add(string.Format("TrackNo=0"));
+            CCD.Add(string.Format("AMin=0"));
+            CCD.Add(string.Format("ASec=0"));
+            CCD.Add(string.Format("AFrame=0"));
+            CCD.Add(string.Format("ALBA=-150"));
+            CCD.Add(string.Format("Zero=0"));
+            CCD.Add(string.Format("PMin={0}", msf_table.IndexOf(msf[0])));
+            CCD.Add(string.Format("PSec={0}", msf_table.IndexOf(msf[1])));
+            CCD.Add(string.Format("PFrame={0}", msf_table.IndexOf(msf[2])));
+            CCD.Add(string.Format("PLBA={0}", lead_out));
+
+            int entry = 3;
 
             for (int i = 0; i < control_ccd.Count; i++)
             {
-                byte[] msf = CalculateMSF(control_ccd[i].offset + 150);
+                msf = CalculateMSF(control_ccd[i].offset + 150);
 
                 CCD.Add(string.Format("[Entry {0}]", entry++));
                 CCD.Add(string.Format("Session={0}", 1));
@@ -259,9 +284,9 @@ namespace sub_generator
                 CCD.Add(string.Format("AFrame=0"));
                 CCD.Add(string.Format("ALBA=-150"));
                 CCD.Add(string.Format("Zero=0"));
-                CCD.Add(string.Format("PMin={0}", msf[0]));
-                CCD.Add(string.Format("PSec={0}", msf[1]));
-                CCD.Add(string.Format("PFrame={0}", msf[2]));
+                CCD.Add(string.Format("PMin={0}", msf_table.IndexOf(msf[0])));
+                CCD.Add(string.Format("PSec={0}", msf_table.IndexOf(msf[1])));
+                CCD.Add(string.Format("PFrame={0}", msf_table.IndexOf(msf[2])));
                 CCD.Add(string.Format("PLBA={0}", control_ccd[i].offset));
             }
 
